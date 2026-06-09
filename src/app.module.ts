@@ -38,10 +38,10 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
       isGlobal: true,
       ttl: 24 * 60 * 60 * 1000,
     }),
-    /* RedisModule.forRoot({
+    RedisModule.forRoot({
       type: 'single',
       url: process.env.REDIS_URL || 'redis://localhost:6379',
-    }), */
+    }),
     ScheduleModule.forRoot(),
     EventEmitterModule.forRoot(),
     TelegramModule,
