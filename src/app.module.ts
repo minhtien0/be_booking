@@ -29,18 +29,14 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     }),
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: 'localhost',
-      port: 5432,
-      username: 'postgres',
-      password: '123123',
-      database: 'booking_platform',
-      entities: [User, Service, Combo],
+      url: process.env.DATABASE_URL,
       autoLoadEntities: true,
       synchronize: true,
+      entities: [User, Service, Combo],
     }),
     CacheModule.register({
       isGlobal: true,
-      ttl: 24 * 60 * 60 * 1000, 
+      ttl: 24 * 60 * 60 * 1000,
     }),
     RedisModule.forRoot({
       type: 'single',
