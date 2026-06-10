@@ -36,6 +36,17 @@ export class AuthController {
     return this.authService.login(dto, ip);
   }
 
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async logout(@Req() req: Request, @Body('refresh_token') refreshToken: string) {
+    // req.user được sinh ra từ JwtAuthGuard chứa payload của Access Token
+    const userPayload = (req as any).user;
+
+    // Truyền cả thông tin user và refresh token sang Service xử lý
+    return this.authService.logout(userPayload, refreshToken);
+  }
+
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refresh(@Body('refresh_token') refreshToken: string) {

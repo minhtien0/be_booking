@@ -85,4 +85,18 @@ export class UsersService {
       },
     };
   }
+
+  async findOneWithRefreshToken(id: number): Promise<User | null> {
+    return this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.refresh_token')  
+      .where('user.id = :id', { id })
+      .getOne();
+  }
+
+  // ── Lưu / xoá hashed refresh token ──────────────────────────────────────────
+  async updateRefreshToken(userId: number, hashedToken: string | null): Promise<void> {
+    await this.userRepository.update(userId, { refresh_token: hashedToken });
+  }
+
 }
