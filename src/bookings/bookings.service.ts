@@ -4,6 +4,8 @@ import { Repository, In, LessThan } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
+import { JwtService } from '@nestjs/jwt';
+import { jwtConstants } from '../auth/constants';
 
 import { Booking, BookingStatus, VALID_TRANSITIONS } from './entities/booking.entity';
 import { BookingLog } from '../bookinglogs/entities/bookinglog.entity';
@@ -38,6 +40,7 @@ export class BookingsService {
     @InjectRepository(Service) private readonly serviceRepo: Repository<Service>,
     @InjectRepository(Combo) private readonly comboRepo: Repository<Combo>,
     @InjectRedis() private readonly redis: Redis,
+    private readonly jwtService: JwtService,
     private readonly lockService: RedisLockService,
     private readonly otpService: OtpService,
     private readonly slotService: SlotService,
@@ -161,11 +164,52 @@ export class BookingsService {
     booking.otpVerifiedAt = new Date();
 
     await this.bookingRepo.save(booking);
-    await this.addLog(booking.id, 'Xác thực OTP thành công', 'otp');
     return { message: 'OTP xác thực thành công.' };
   }
 
   // Xác Nhận
+  async findBookingsByPhoneAndOptionalCode(
+    customerPhone: string,
+    bookingCode?: string,
+  ): Promise<any[]> { // Đổi kiểu dữ liệu trả về thành any[] để linh hoạt map dữ liệu phẳng
+    let bookings: Booking[] = [];
+
+    // 1. Thực hiện truy vấn kèm theo nạp (JOIN) đầy đủ bảng liên kết dữ liệu
+    if (bookingCode && bookingCode.trim()) {
+      const booking = await this.bookingRepo.findOne({
+        where: { bookingCode: bookingCode.trim(), customerPhone },
+        relations: ['service', 'combo', 'barber'], // SỬA LỖI: Bắt buộc nạp các quan hệ này để lấy Name
+      });
+
+      bookings = booking ? [booking] : [];
+    } else {
+      bookings = await this.bookingRepo.find({
+        where: { customerPhone },
+        relations: ['service', 'combo', 'barber'], // SỬA LỖI: Bắt buộc nạp các quan hệ này để lấy Name
+        order: { bookingDate: 'DESC', },
+      });
+    }
+
+    // 2. MAPPER: Chuyển đổi Object lồng nhau thành các trường phẳng khớp hoàn toàn với Front-end mong đợi
+    return bookings.map((b) => ({
+      id: b.id,
+      bookingCode: b.bookingCode,
+      appointmentTime: b.appointmentTime,
+      bookingDate: b.bookingDate,
+      slotStartTime: b.slotStartTime,
+      slotEndTime: b.slotEndTime,
+      totalDuration: b.totalDuration,
+      snapshotPrice: b.snapshotPrice,
+      status: b.status,
+      customerName: b.customerName,
+      customerPhone: b.customerPhone,
+      note: b.note,
+      serviceName: b.combo ? b.combo.name : (b.service ? b.service.name : 'Dịch vụ tùy chỉnh'),
+      barberName: b.barber ? b.barber.name : 'Chưa chọn thợ',
+      type: b.combo ? 'combo' : 'service',
+    }));
+  }
+
   async confirm(bookingId: number) {
     const booking = await this.findActiveBooking(bookingId);
     this.assertTransition(booking.status, BookingStatus.CONFIRMED);
@@ -229,12 +273,30 @@ export class BookingsService {
         note: booking.note ?? '',
       },
     };
+    const confirmedBooking = await this.bookingRepo.findOne({
+      where: { id: booking.id },
+      relations: ['service', 'combo', 'barber'],
+    });
+
+    const managementToken = this.jwtService.sign({
+      phone: booking.customerPhone,
+      bookingCode: booking.bookingCode,
+    }, {
+      secret: jwtConstants.secret,
+      expiresIn: '15m',
+    });
+    const bookingData = await this.findBookingsByPhoneAndOptionalCode(
+      confirmedBooking.customerPhone,
+      confirmedBooking.bookingCode,
+    )
 
     this.eventEmitter.emit('booking.confirmed', payload);
 
     return {
       booking_id: booking.id,
       status: BookingStatus.CONFIRMED,
+      managementToken,
+      booking: bookingData,
       message: 'Đặt lịch thành công!',
     };
   }
