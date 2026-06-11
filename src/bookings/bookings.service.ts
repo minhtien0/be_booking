@@ -473,7 +473,7 @@ export class BookingsService {
     const checks = [
       {
         key: `rate:daily:${phoneHash}`,
-        max: 2,
+        max: 20,
         message: 'Bạn đã đặt tối đa 2 lịch hôm nay. Vui lòng thử lại vào ngày mai.',
       },
       {
