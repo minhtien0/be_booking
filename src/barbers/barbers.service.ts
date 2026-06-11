@@ -1,16 +1,18 @@
-import { Injectable, ConflictException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, ConflictException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { BarberStatus } from './entities/barber.entity';
 import { Repository } from 'typeorm';
 import { Barber } from './entities/barber.entity';
 import { CreateBarberDto } from './dto/create-barber.dto';
 import { UpdateBarberDto } from './dto/update-barber.dto';
+import { BookingsQueryService } from './../bookings/services/bookings-query.service'
 
 @Injectable()
 export class BarbersService {
   constructor(
     @InjectRepository(Barber)
     private readonly barberRepository: Repository<Barber>,
+    private readonly bookingsServiceQuery: BookingsQueryService,
   ) { }
   async create(createBarberDto: CreateBarberDto): Promise<Barber> {
     const { name } = createBarberDto;
@@ -36,6 +38,44 @@ export class BarbersService {
       return { data: allBarber };
     } catch (error) {
       throw new InternalServerErrorException('Không thể lấy danh sách bảng giá lúc này');
+    }
+  }
+
+  async getBarberWithMostFreeSlots(date: string): Promise<{
+    id: number
+    name: string
+    role: string
+    avatar: string | null
+    freeSlots: number
+  }> {
+    // Lấy tất cả barber active
+    const barbers = await this.barberRepository.find({
+      where: { status: BarberStatus.ACTIVE },
+    })
+
+    if (!barbers.length) {
+      throw new NotFoundException('Không có barber nào.')
+    }
+
+    // Tính số slot trống cho từng barber song song
+    const results = await Promise.all(
+      barbers.map(async (barber) => {
+        const slots = await this.bookingsServiceQuery.getAvailableSlots(barber.id, date)
+        return { barber, freeSlots: slots.length }
+      })
+    )
+
+    // Lấy barber có nhiều slot trống nhất
+    const best = results.reduce((prev, curr) =>
+      curr.freeSlots > prev.freeSlots ? curr : prev
+    )
+
+    return {
+      id: best.barber.id,
+      name: best.barber.name,
+      role: best.barber.role,
+      avatar: best.barber.avatar,
+      freeSlots: best.freeSlots,
     }
   }
 

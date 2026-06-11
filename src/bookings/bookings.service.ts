@@ -1,7 +1,9 @@
-import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException, Inject, HttpException, HttpStatus, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, LessThan } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { InjectRedis } from '@nestjs-modules/ioredis';
+import Redis from 'ioredis';
 
 import { Booking, BookingStatus, VALID_TRANSITIONS } from './entities/booking.entity';
 import { BookingLog } from '../bookinglogs/entities/bookinglog.entity';
@@ -35,7 +37,7 @@ export class BookingsService {
     @InjectRepository(BookingLog) private readonly logRepo: Repository<BookingLog>,
     @InjectRepository(Service) private readonly serviceRepo: Repository<Service>,
     @InjectRepository(Combo) private readonly comboRepo: Repository<Combo>,
-
+    @InjectRedis() private readonly redis: Redis,
     private readonly lockService: RedisLockService,
     private readonly otpService: OtpService,
     private readonly slotService: SlotService,
@@ -80,6 +82,9 @@ export class BookingsService {
     // Check có nằm trong blacklist hay không
     const phoneHash = this.cryptoService.hashPhone(customer_phone);
     await this.blacklistService.checkBlacklist(phoneHash);
+
+    // Check ratelimit 
+    await this.checkRateLimit(ipAddress, customer_phone);
 
     // Lock lại bằng redis
     const slotEndTime = this.calcEndTime(slot_start_time, snapshotDuration);
@@ -130,6 +135,9 @@ export class BookingsService {
     if (!lockResult.success) throw new ConflictException('Slot đang được xử lý. Thử lại sau.');
 
     const booking = lockResult.result;
+    // Tăng ratelimit
+    await this.incrementRateLimit(ipAddress, customer_phone);
+    // Send 
     await this.otpService.send({ type: 'booking', bookingId: booking.id }, customer_phone);
 
     return {
@@ -456,5 +464,53 @@ export class BookingsService {
       nextSequence = String(parseInt(parts[2], 10) + 1).padStart(3, '0');
     }
     return `BK-${yearMonth}-${nextSequence}`;
+  }
+
+  // Dùng đúng key format của middleware để dùng chung 1 counter
+  private async checkRateLimit(ip: string, phone: string): Promise<void> {
+    const phoneHash = this.cryptoService.hashPhone(phone);
+
+    const checks = [
+      {
+        key: `rate:daily:${phoneHash}`,
+        max: 2,
+        message: 'Bạn đã đặt tối đa 2 lịch hôm nay. Vui lòng thử lại vào ngày mai.',
+      },
+      {
+        key: `rate:weekly:${phoneHash}`,
+        max: 5,
+        message: 'Bạn đã đặt tối đa 5 lịch tuần này. Vui lòng liên hệ tiệm trực tiếp.',
+      },
+      {
+        key: `rate:daily:${ip}`,
+        max: 20,
+        message: 'Quá nhiều yêu cầu từ địa chỉ này. Thử lại sau.',
+      },
+    ];
+
+    for (const { key, max, message } of checks) {
+      const count = Number(await this.redis.get(key) ?? 0);
+      if (count >= max) {
+        throw new HttpException(
+          { statusCode: HttpStatus.TOO_MANY_REQUESTS, message },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+    }
+  }
+
+  private async incrementRateLimit(ip: string, phone: string): Promise<void> {
+    const phoneHash = this.cryptoService.hashPhone(phone);
+    const DAY = 60 * 60 * 24;
+    const WEEK = DAY * 7;
+
+    const pipeline = this.redis.pipeline();
+    pipeline.incr(`rate:daily:${phoneHash}`);
+    pipeline.expire(`rate:daily:${phoneHash}`, DAY);
+    pipeline.incr(`rate:weekly:${phoneHash}`);
+    pipeline.expire(`rate:weekly:${phoneHash}`, WEEK);
+    pipeline.incr(`rate:daily:${ip}`);
+    pipeline.expire(`rate:daily:${ip}`, DAY);
+    await pipeline.exec();
   }
 }

@@ -75,7 +75,7 @@ import { JwtModule } from '@nestjs/jwt';
     BlacklistMiddleware,
     RateLimitMiddleware,
   ],
-  exports: [BookingsService, OtpService, BookingGateway], // Export nếu các module khác (như Dashboard/Thống kê) cần dùng chung
+  exports: [BookingsService, OtpService, BookingGateway, BookingsQueryService], // Export nếu các module khác (như Dashboard/Thống kê) cần dùng chung
 })
 export class BookingsModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

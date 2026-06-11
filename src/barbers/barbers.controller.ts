@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, HttpCode, HttpStatus, BadRequestException, Query } from '@nestjs/common';
 import { BarbersService } from './barbers.service';
 import { CreateBarberDto } from './dto/create-barber.dto';
 import { UpdateBarberDto } from './dto/update-barber.dto';
@@ -21,6 +21,14 @@ export class BarbersController {
   @Get('list')
   findAll() {
     return this.barbersService.findAll();
+  }
+
+  @Get('busiest-free')
+  async getBusiestFreeBarber(@Query('date') date: string) {
+    if (!date) {
+      throw new BadRequestException('Vui lòng truyền date (YYYY-MM-DD)')
+    }
+    return this.barbersService.getBarberWithMostFreeSlots(date)
   }
 
   @Get(':id')

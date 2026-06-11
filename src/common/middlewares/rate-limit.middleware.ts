@@ -18,7 +18,6 @@ export class RateLimitMiddleware implements NestMiddleware {
 
   async use(req: Request, res: Response, next: NextFunction) {
     // Chỉ áp dụng cho POST /bookings/hold
-    return next();
     if (req.method !== 'POST' || !req.path.includes('/hold')) {
       return next();
     }
